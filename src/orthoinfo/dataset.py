@@ -1,129 +1,96 @@
 """Step 4b: build a documented, versioned dataset from raw downloads.
 
 Outputs in data/processed/<version>/:
-  documents.jsonl  one record per source (health topic) — see docs/data_dictionary.md
-  chunks.jsonl     one record per section of a document; the unit that search ranks
-  inventory.csv    human-readable source inventory for the sponsor and reviewer
-  manifest.json    counts and SHA-256 checksums so a version can be verified later
+  documents.jsonl.gz  one record per source document — see docs/data_dictionary.md
+  chunks.jsonl.gz     ~220-word pieces of each section; the unit search ranks
+  inventory.csv       source inventory (no text) for the sponsor and reviewer
+  manifest.json       counts by source and licence, SHA-256 checksums
 """
 
 from __future__ import annotations
 
 import csv
+import gzip
 import hashlib
 import json
+from collections import Counter
 from pathlib import Path
 
-from .collect import parse_search_xml
-from .config import PROCESSED_DIR, RAW_DIR, ROOT, latest_version, load_scope
-from .text import html_to_lines, split_sections, strip_html
+from .config import PROCESSED_DIR, RAW_DIR, latest_version, load_scope, load_sources_config
+from .sources import SOURCES
+from .text import chunk_text
 
-PUBLISHER = "MedlinePlus, U.S. National Library of Medicine"
-AUDIENCE = "patients and caregivers"
-# Verify with the reviewer/sponsor before publishing anything: see
-# https://medlineplus.gov/about/using/usingcontent/
-PERMITTED_USE = (
-    "NLM-written MedlinePlus health topic summaries are public domain; credit MedlinePlus "
-    "and link to the source. Confirm against MedlinePlus 'Using our content' before reuse."
-)
-
-
-def _doc_id(url: str) -> str:
-    return url.rstrip("/").rsplit("/", 1)[-1].removesuffix(".html")
-
-
-def _first(doc: dict, key: str, default: str = "") -> str:
-    values = doc.get(key) or [default]
-    return values[0]
+CHUNK_WORDS = 220
+CHUNK_FIELDS = ("doc_id", "source", "source_type", "audience", "title", "alt_titles", "url",
+                "container", "published", "last_updated", "role")
+INVENTORY_FIELDS = ("doc_id", "source", "source_type", "title", "role", "audience", "authors",
+                    "container", "publisher", "published", "last_updated", "retrieved", "url", "license")
 
 
 def build(version: str | None = None) -> Path:
     version = version or latest_version(RAW_DIR)
     raw = RAW_DIR / version
-    raw_manifest = json.loads((raw / "manifest.json").read_text(encoding="utf-8"))
-    scope = load_scope()
+    cfg, scope = load_sources_config(), load_scope()
+    core = set(scope.get("core_doc_ids", []))
 
-    documents, chunks = [], []
-    for topic in raw_manifest["topics"]:
-        parsed = parse_search_xml((raw / topic["raw_file"]).read_text(encoding="utf-8"))
-        match = next((d for d in parsed if d["url"] == topic["url"]), None)
-        if match is None:
-            print(f"WARNING: no document for '{topic['term']}', skipped")
+    documents: dict[str, dict] = {}
+    for name, module in SOURCES.items():
+        if not (raw / name / "manifest.json").exists():
             continue
+        before = len(documents)
+        for doc in module.parse(raw / name, cfg.get(name, {})):
+            doc["role"] = "core" if doc["doc_id"] in core else "context"
+            doc["specialty"] = scope["specialty"]
+            doc["dataset_version"] = version
+            documents.setdefault(doc["doc_id"], doc)
+        print(f"  {name:12s} {len(documents) - before:6d} documents")
+    if not documents:
+        raise SystemExit(f"No raw data in {raw}. Run `orthoinfo collect` first.")
 
-        doc_id = _doc_id(match["url"])
-        title = strip_html(_first(match, "title"))
-        summary_html = _first(match, "FullSummary")
-        documents.append(
-            {
-                "doc_id": doc_id,
-                "title": title,
-                "alt_titles": [strip_html(t) for t in match.get("altTitle", [])],
-                "mesh_terms": [strip_html(t) for t in match.get("mesh", [])],
-                "groups": match.get("groupName", []),
-                "specialty": scope["specialty"],
-                "role": topic["role"],
-                "audience": AUDIENCE,
-                "publisher": PUBLISHER,
-                "organization": _first(match, "organizationName"),
-                "url": match["url"],
-                "last_updated": topic.get("last_updated"),
-                "retrieved": raw_manifest["retrieved"],
-                "permitted_use": PERMITTED_USE,
-                "language": scope.get("language", "en"),
-                "summary_html": summary_html,
-                "search_term": topic["term"],
-                "dataset_version": version,
-            }
-        )
-        for i, section in enumerate(split_sections(html_to_lines(summary_html), f"About {title}")):
-            chunks.append(
-                {
-                    "chunk_id": f"{doc_id}#{i}",
-                    "doc_id": doc_id,
-                    "title": title,
-                    "alt_titles": documents[-1]["alt_titles"],
-                    "heading": section["heading"],
-                    "text": section["text"],
-                    "url": match["url"],
-                    "last_updated": topic.get("last_updated"),
-                    "role": topic["role"],
-                }
-            )
+    chunks = []
+    for doc in documents.values():
+        n = 0
+        for section in doc["sections"]:
+            for text in chunk_text(section["text"], CHUNK_WORDS):
+                chunks.append({"chunk_id": f"{doc['doc_id']}#{n}", **{f: doc.get(f) for f in CHUNK_FIELDS},
+                               "heading": section["heading"], "text": text})
+                n += 1
 
     out = PROCESSED_DIR / version
     out.mkdir(parents=True, exist_ok=True)
-    _write_jsonl(out / "documents.jsonl", documents)
-    _write_jsonl(out / "chunks.jsonl", chunks)
+    write_jsonl(out / "documents.jsonl.gz", documents.values())
+    write_jsonl(out / "chunks.jsonl.gz", chunks)
     with (out / "inventory.csv").open("w", newline="", encoding="utf-8") as fh:
-        fields = ["doc_id", "title", "role", "audience", "publisher", "url",
-                  "last_updated", "retrieved", "permitted_use"]
-        writer = csv.DictWriter(fh, fieldnames=fields, extrasaction="ignore")
+        writer = csv.DictWriter(fh, fieldnames=INVENTORY_FIELDS, extrasaction="ignore")
         writer.writeheader()
-        writer.writerows(documents)
+        writer.writerows(documents.values())
 
+    docs = list(documents.values())
     manifest = {
         "version": version,
-        "source_manifest": (raw / "manifest.json").relative_to(ROOT).as_posix(),
-        "documents": len(documents),
+        "documents": len(docs),
         "chunks": len(chunks),
-        "sha256": {
-            name: hashlib.sha256((out / name).read_bytes()).hexdigest()
-            for name in ("documents.jsonl", "chunks.jsonl", "inventory.csv")
-        },
+        "words": sum(len(c["text"].split()) for c in chunks),
+        "by_source": dict(Counter(d["source"] for d in docs)),
+        "by_source_type": dict(Counter(d["source_type"] for d in docs)),
+        "by_license": dict(Counter(d["license"].split(" — ")[0] for d in docs)),
+        "sha256": {name: hashlib.sha256((out / name).read_bytes()).hexdigest()
+                   for name in ("documents.jsonl.gz", "chunks.jsonl.gz", "inventory.csv")},
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return out
 
 
-def _write_jsonl(path: Path, rows: list[dict]) -> None:
-    with path.open("w", encoding="utf-8") as fh:
+def write_jsonl(path: Path, rows) -> None:
+    # mtime=0 keeps the gzip bytes (and checksum) identical for identical content.
+    with path.open("wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", mtime=0) as gz:
         for row in rows:
-            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+            gz.write((json.dumps(row, ensure_ascii=False) + "\n").encode("utf-8"))
 
 
 def read_jsonl(path: Path) -> list[dict]:
-    with path.open(encoding="utf-8") as fh:
+    opener = gzip.open if path.suffix == ".gz" else open
+    with opener(path, "rt", encoding="utf-8") as fh:
         return [json.loads(line) for line in fh if line.strip()]
 
 
@@ -131,4 +98,4 @@ def load_dataset(version: str | None = None) -> tuple[str, list[dict], list[dict
     """Return (version, documents, chunks) for a processed dataset version."""
     version = version or latest_version(PROCESSED_DIR)
     base = PROCESSED_DIR / version
-    return version, read_jsonl(base / "documents.jsonl"), read_jsonl(base / "chunks.jsonl")
+    return version, read_jsonl(base / "documents.jsonl.gz"), read_jsonl(base / "chunks.jsonl.gz")

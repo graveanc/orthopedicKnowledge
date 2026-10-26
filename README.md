@@ -5,8 +5,10 @@ sponsor project. It helps one group of users (starting hypothesis: patients and 
 preparing for an appointment) answer real questions about hand and upper-extremity
 conditions, and it produces evidence about whether it improves on the current prototype.
 
-**Educational only.** It uses public information (MedlinePlus) and fictional scenarios.
-It does not give individual diagnosis or treatment recommendations.
+**Educational only.** It uses openly licensed public information (MedlinePlus, NIH/NIAMS,
+an OpenStax textbook, open-access research from Europe PMC, Wikipedia — see
+[docs/sources.md](docs/sources.md)) and fictional scenarios. It does not give individual
+diagnosis or treatment recommendations.
 
 ## Setup
 
@@ -36,11 +38,12 @@ pip install -e ".[semantic,dev]"
 
 | Command | What it does | Plan step |
 |---|---|---|
-| `orthoinfo collect` | Download topics in `config/scope.toml` from the MedlinePlus web service into `data/raw/<version>/` | 4 |
+| `orthoinfo collect` | Download every source enabled in `config/sources.toml` into `data/raw/<version>/`. Resumable; `--sources niams,wikipedia` for a subset | 4 |
 | `orthoinfo build` | Clean raw data into `data/processed/<version>/` (documents, chunks, inventory, checksums) | 4 |
 | `orthoinfo validate-questions` | Check `data/eval/questions.jsonl` against the dataset | 5 |
-| `orthoinfo search "why do my fingers go numb"` | Try one query in the terminal | 7 |
-| `orthoinfo evaluate --split dev` | Compare bm25 / semantic / hybrid; writes `results/<run>/` | 6–7 |
+| `orthoinfo search "why do my fingers go numb"` | Try one query in the terminal (`--types all` to include every source type) | 7 |
+| `orthoinfo pool` | List unlabelled top results per question for the reviewer to judge | 5, 7 |
+| `orthoinfo evaluate --split dev` | Compare bm25 / semantic / hybrid; writes `results/<run>/` (`--types` as above) | 6–7 |
 | `orthoinfo serve` | Run the web app at http://127.0.0.1:5000 | 8 |
 | `orthoinfo pilot-summary` | Summarise usability-session CSVs in `data/pilot/` | 6, 9 |
 | `pytest` | Run the tests | – |
@@ -51,13 +54,15 @@ search method; `ORTHOINFO_LOG_QUERIES=1` logs anonymous queries to `data/logs/` 
 ## Project layout
 
 ```
-config/            scope.toml (topics), search.toml (method, thresholds), appointment_questions.toml
-data/raw/          unmodified API responses, one folder per dataset version
+config/            sources.toml (what to collect), scope.toml (core conditions),
+                   search.toml (method, thresholds, default source types), appointment_questions.toml
+data/raw/          unmodified downloads, data/raw/<version>/<source>/
 data/processed/    cleaned dataset versions (see docs/data_dictionary.md)
 data/eval/         questions.jsonl — evaluation questions with dev/test split
 data/pilot/        fictional scenarios and session-log template
 docs/              problem statement, scope, review plan, scoring guide, reports, handoff
-src/orthoinfo/     collect → dataset → search → experiment; app (Flask); pilot; cli
+src/orthoinfo/     sources/ (one module per source) → collect → dataset → search → experiment;
+                   app (Flask); pilot; cli
 tests/
 ```
 

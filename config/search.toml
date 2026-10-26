@@ -4,6 +4,11 @@
 default_method = "bm25"
 semantic_model = "sentence-transformers/all-MiniLM-L6-v2"
 
+# Source types searched by default, in the app and in `orthoinfo evaluate`.
+# One of: patient_education, encyclopedia, textbook, research_article.
+# The app has a checkbox to widen a search to all types.
+default_source_types = ["patient_education"]
+
 # If a method's confidence (its top score) is below this value, the app says the
 # collection cannot answer the question instead of showing weak matches.
 # BM25 scores are unbounded; semantic/hybrid use cosine similarity (0-1).

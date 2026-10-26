@@ -1,50 +1,58 @@
 # Data dictionary
 
 Produced by `orthoinfo build` in `data/processed/<version>/`. A version is
-immutable once used in an experiment: re-collect under a new version label instead
-of editing files in place. `manifest.json` stores SHA-256 checksums for each file.
+immutable once used in an experiment: collect under a new version label instead
+of editing files in place. `manifest.json` stores counts and SHA-256 checksums.
+Where each source comes from and its licence: [sources.md](sources.md).
 
 ## Pipeline
 
 ```
-config/scope.toml --collect--> data/raw/<version>/*.xml + manifest.json   (unmodified API responses)
-                  --build-->   data/processed/<version>/documents.jsonl, chunks.jsonl, inventory.csv
+config/sources.toml --collect--> data/raw/<version>/<source>/...    (unmodified downloads + manifest.json)
+                    --build-->   data/processed/<version>/documents.jsonl.gz, chunks.jsonl.gz,
+                                                          inventory.csv, manifest.json
 ```
 
-## documents.jsonl — one row per source
+Raw layout per source: `medlineplus/topics.xml` (bulk file) + `last_updated.json`;
+`niams/<topic>[__<tab>].html`; `openstax/<page>.html`; `europepmc/articles.jsonl` +
+`fulltext/<PMCID>.xml` (JATS; not committed to git, re-downloadable);
+`wikipedia/<title>.json` + `matches.json` (which topic matched which article).
+
+## documents.jsonl.gz — one row per source document
 
 | Field | Type | Description |
 |---|---|---|
-| `doc_id` | string | Stable id from the URL slug, e.g. `carpaltunnelsyndrome` |
-| `title` | string | Topic title, highlighting removed |
-| `alt_titles` | list[str] | Other names MedlinePlus lists (e.g. "Median nerve entrapment") |
-| `mesh_terms` | list[str] | MeSH headings attached by NLM |
-| `groups` | list[str] | MedlinePlus topic groups (e.g. "Bones, Joints and Muscles") |
-| `specialty` | string | From `config/scope.toml` |
-| `role` | `core` \| `context` | Core = one of the committed conditions; context = related neighbour |
+| `doc_id` | string | Stable, prefixed id: `mplus:carpaltunnelsyndrome`, `niams:gout`, `openstax:<book>:<page>`, `pmc:PMC1234567`, `wiki:Trigger_finger` |
+| `source` | string | `medlineplus`, `niams`, `openstax`, `europepmc`, `wikipedia` |
+| `source_type` | string | `patient_education`, `textbook`, `research_article`, `encyclopedia` |
+| `title` | string | Document title |
+| `alt_titles` | list[str] | Other names (MedlinePlus "also called") |
+| `authors` | string | Author list (first three + "et al."), or the organisation |
+| `container` | string | Journal, book or website the document belongs to |
+| `publisher` | string | Publishing organisation (journal name for articles) |
 | `audience` | string | Intended reader of the source |
-| `publisher` | string | Publishing organisation |
-| `organization` | string | Organisation named by the API |
-| `url` | string | Canonical source page |
-| `last_updated` | ISO date \| null | "Last updated" date scraped from the page; null if not found |
+| `url` | string | Canonical page for the document |
+| `license` | string | Licence / terms, as recorded from the source |
+| `published` | string \| null | Publication or creation date/year |
+| `last_updated` | ISO date \| null | Last updated / reviewed date stated by the source |
 | `retrieved` | ISO datetime (UTC) | When the team downloaded it |
-| `permitted_use` | string | Reuse terms — confirm before publishing |
 | `language` | string | ISO 639-1 code |
-| `summary_html` | string | Full summary HTML exactly as returned by the API |
-| `search_term` | string | Query used to obtain it |
-| `dataset_version` | string | Version label |
+| `mesh_terms`, `groups` | list[str] | MeSH headings and MedlinePlus groups (MedlinePlus only) |
+| `related_links` | list[obj] | `{title, url, organization}` links curated by MedlinePlus (links only) |
+| `sections` | list[obj] | `{heading, text}` in reading order; list items are lines starting `- ` |
+| `role` | `core` \| `context` | `core` = listed in `config/scope.toml` (the project's committed conditions) |
+| `specialty`, `dataset_version` | string | From the scope file / version label |
+| `doi`, `pub_types`, `cited_by`, `collected_for` | | Research articles only: DOI, publication types, citation count at collection time, query that found it |
 
-## chunks.jsonl — one row per section (the unit search ranks)
+## chunks.jsonl.gz — the unit search ranks
 
-| Field | Type | Description |
-|---|---|---|
-| `chunk_id` | string | `<doc_id>#<n>` |
-| `doc_id`, `title`, `alt_titles`, `url`, `last_updated`, `role` | | Copied from the document |
-| `heading` | string | Section question, e.g. "What causes carpal tunnel syndrome?"; `About <title>` if none |
-| `text` | string | Plain text; list items on their own line starting with `- ` |
+Sections split into pieces of at most ~220 words at line, then sentence, boundaries.
 
-Sections longer than ~220 words are split; headings are detected as short lines
-ending in `?` (MedlinePlus style).
+| Field | Description |
+|---|---|
+| `chunk_id` | `<doc_id>#<n>` |
+| `heading`, `text` | Section heading and the piece of text |
+| `doc_id`, `source`, `source_type`, `audience`, `title`, `alt_titles`, `url`, `container`, `published`, `last_updated`, `role` | Copied from the document so results can be shown and filtered without a lookup |
 
 ## data/eval/questions.jsonl — evaluation questions
 
@@ -53,7 +61,7 @@ ending in `?` (MedlinePlus style).
 | `id` | string | `q001`… never reused |
 | `question` | string | Wording as a user would type it (keep interview wording verbatim) |
 | `category` | `lay` \| `technical` \| `ambiguous` \| `unanswerable` \| `out_of_scope` | See scoring guide |
-| `relevant_doc_ids` | list[str] | Sources that contain the needed information (empty for unanswerable) |
+| `relevant_doc_ids` | list[str] | Documents containing the needed information (empty for unanswerable). Extend with `orthoinfo pool` |
 | `must_include` | list[str] | Points an acceptable result/answer must contain |
 | `paraphrase_group` | string | Same id for rewordings of one information need ("" if none) |
 | `split` | `dev` \| `test` | Test questions are never used for tuning |
@@ -63,7 +71,10 @@ ending in `?` (MedlinePlus style).
 
 ## Known data quality notes
 
-- The MedlinePlus API has no review-date field; dates are scraped from the page footer.
 - Source text is kept verbatim, including source typos (e.g. "Prescriptionsteroids" in the
-  carpal tunnel summary, 2026-10-12).
-- Several "context" topics are a single short overview section, so they rank as one chunk.
+  MedlinePlus carpal tunnel summary).
+- Research articles: tables, figures and reference lists are dropped; funding, ethics and
+  similar administrative sections are skipped. Inline citation markers (e.g. "[12]") remain.
+- MedlinePlus and NIAMS groups include some non-orthopedic topics (e.g. lupus, multiple
+  sclerosis). Remove with `exclude` (NIAMS) or narrow `groups` if they distract.
+- Wikipedia matches are automatic (best search hit per topic title); check `matches.json`.

@@ -15,26 +15,26 @@ general = [
     "Where can I read more about this from a reliable source?",
 ]
 
-[topics.carpaltunnelsyndrome]
+[topics."mplus:carpaltunnelsyndrome"]
 questions = [
     "Which activities might be making my hand symptoms worse?",
     "Would a wrist splint or changes at work help in my situation?",
     "At what point would surgery be worth discussing?",
 ]
 
-[topics.handinjuriesanddisorders]
+[topics."mplus:handinjuriesanddisorders"]
 questions = [
     "Is this problem in a bone, joint, tendon, or nerve?",
     "Will this affect my grip or how I use my hand at work?",
 ]
 
-[topics.wristinjuriesanddisorders]
+[topics."mplus:wristinjuriesanddisorders"]
 questions = [
     "Do I need an X-ray or other imaging for my wrist?",
     "How long before I can use my wrist normally again?",
 ]
 
-[topics.elbowinjuriesanddisorders]
+[topics."mplus:elbowinjuriesanddisorders"]
 questions = [
     "Is this related to overuse, and which movements should I limit?",
     "Would physical therapy or exercises help?",

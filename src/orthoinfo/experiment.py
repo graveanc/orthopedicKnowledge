@@ -28,7 +28,8 @@ from .search import build_retriever
 K = 10
 
 
-def evaluate_method(method: str, chunks: list[dict], questions: list[dict], cfg: dict, cache_dir: Path) -> dict:
+def evaluate_method(method: str, chunks: list[dict], questions: list[dict], cfg: dict, cache_dir: Path,
+                    source_types: list[str] | None = None) -> dict:
     t0 = time.perf_counter()
     retriever = build_retriever(method, chunks, cfg["semantic_model"], cache_dir)
     index_seconds = time.perf_counter() - t0
@@ -37,7 +38,8 @@ def evaluate_method(method: str, chunks: list[dict], questions: list[dict], cfg:
     rows, latencies = [], []
     for q in questions:
         t = time.perf_counter()
-        result = retriever.search(q["question"], k=K)
+        # Several chunks can come from one document; fetch enough to rank K documents.
+        result = retriever.search(q["question"], k=K * 5, source_types=source_types)
         latencies.append((time.perf_counter() - t) * 1000)
         ranked = result.ranked_doc_ids()
         rel = set(q["relevant_doc_ids"])
@@ -116,8 +118,11 @@ def evaluate_method(method: str, chunks: list[dict], questions: list[dict], cfg:
     }
 
 
-def run(methods: list[str], split: str, version: str | None = None) -> Path:
+def run(methods: list[str], split: str, version: str | None = None,
+        source_types: list[str] | None = None) -> Path:
     cfg = load_search_config()
+    if source_types is None:
+        source_types = cfg.get("default_source_types")
     version, _, chunks = load_dataset(version)
     questions = load_questions(split=split)
     if not questions:
@@ -125,9 +130,9 @@ def run(methods: list[str], split: str, version: str | None = None) -> Path:
 
     results = []
     for method in methods:
-        print(f"Evaluating {method} on {len(questions)} {split} questions...")
+        print(f"Evaluating {method} on {len(questions)} {split} questions ({', '.join(source_types or ['all sources'])})...")
         try:
-            results.append(evaluate_method(method, chunks, questions, cfg, PROCESSED_DIR / version))
+            results.append(evaluate_method(method, chunks, questions, cfg, PROCESSED_DIR / version, source_types))
         except (RuntimeError, OSError) as exc:
             print(f"  skipped {method}: {exc}")
 
@@ -140,7 +145,8 @@ def run(methods: list[str], split: str, version: str | None = None) -> Path:
             writer = csv.DictWriter(fh, fieldnames=list(rows[0]))
             writer.writeheader()
             writer.writerows(rows)
-    meta = {"dataset_version": version, "split": split, "n_questions": len(questions), "k": K}
+    meta = {"dataset_version": version, "split": split, "n_questions": len(questions), "k": K,
+            "source_types": source_types or "all"}
     (out / "summary.json").write_text(json.dumps(meta | {"methods": results}, indent=2), encoding="utf-8")
     (out / "summary.md").write_text(render_markdown(meta, results), encoding="utf-8")
     print((out / "summary.md").read_text(encoding="utf-8"))
@@ -153,7 +159,8 @@ def render_markdown(meta: dict, results: list[dict]) -> str:
     lines = [
         f"# Search experiment — {meta['split']} split",
         "",
-        f"Dataset version `{meta['dataset_version']}`, {meta['n_questions']} questions, metrics over source documents.",
+        f"Dataset version `{meta['dataset_version']}`, {meta['n_questions']} questions, "
+        f"source types: {meta['source_types']}. Metrics over source documents.",
         "",
         "## Ranking quality (answerable questions)",
         "",
@@ -188,3 +195,44 @@ def render_markdown(meta: dict, results: list[dict]) -> str:
     lines += ["", "Small question sets give noisy numbers: report counts alongside rates and "
               "read failures in per_question.csv before drawing conclusions.", ""]
     return "\n".join(lines)
+
+
+def pool(methods: list[str], depth: int = 5, version: str | None = None,
+         source_types: list[str] | None = None) -> Path:
+    """Write the unlabelled top results of every method for relevance judging.
+
+    A larger collection means questions have relevant documents nobody has
+    labelled yet, which makes every method look worse. Standard fix ("pooling"):
+    judge the union of each method's top `depth` documents, then add the relevant
+    ones to `relevant_doc_ids` in questions.jsonl.
+    """
+    cfg = load_search_config()
+    if source_types is None:
+        source_types = cfg.get("default_source_types")
+    version, documents, chunks = load_dataset(version)
+    titles = {d["doc_id"]: (d["title"], d["url"]) for d in documents}
+    questions = [q for q in load_questions() if q["category"] not in ABSTAIN_CATEGORIES]
+
+    found: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for method in methods:
+        try:
+            retriever = build_retriever(method, chunks, cfg["semantic_model"], PROCESSED_DIR / version)
+        except (RuntimeError, OSError) as exc:
+            print(f"  skipped {method}: {exc}")
+            continue
+        for q in questions:
+            ranked = retriever.search(q["question"], k=depth * 5, source_types=source_types).ranked_doc_ids()
+            for doc_id in ranked[:depth]:
+                if doc_id not in q["relevant_doc_ids"]:
+                    found[(q["id"], doc_id)].append(method)
+
+    out = RESULTS_DIR / f"pool_{dt.datetime.now():%Y%m%d-%H%M%S}.csv"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    by_id = {q["id"]: q for q in questions}
+    with out.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["question_id", "question", "doc_id", "title", "url", "found_by", "relevant (y/n)"])
+        for (qid, doc_id), found_by in sorted(found.items()):
+            writer.writerow([qid, by_id[qid]["question"], doc_id, *titles[doc_id], "+".join(found_by), ""])
+    print(f"{len(found)} unjudged (question, document) pairs written to {out}")
+    return out

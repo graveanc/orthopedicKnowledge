@@ -16,7 +16,19 @@ header.site { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: base
 .tag { color: var(--muted); font-size: .9rem; }
 header nav { margin-left: auto; }
 main { max-width: 46rem; margin: 0 auto; padding: 1rem; }
-form.search { display: flex; gap: .5rem; margin: 1rem 0 1.5rem; }
+form.search { margin: 1rem 0 1.5rem; }
+form.search .row { display: flex; gap: .5rem; }
+.widen { display: block; margin-top: .5rem; font-size: .9rem; color: var(--muted); }
+.muted { color: var(--muted); font-size: .9rem; }
+.badge { display: inline-block; font-size: .75rem; font-weight: 600; padding: .05rem .45rem;
+         border-radius: 999px; border: 1px solid var(--line); margin-right: .35rem; }
+.badge-patient_education { background: #e3f1e6; color: #1e5b2c; border-color: #b9dcc0; }
+.badge-textbook { background: #e6ecfa; color: #24427e; border-color: #c2cff0; }
+.badge-encyclopedia { background: #f1ebfa; color: #503080; border-color: #d8c8f0; }
+.badge-research_article { background: #fbefe0; color: #7a4a10; border-color: #efd2a8; }
+.license, .audience-note { font-size: .85rem; }
+.audience-note { font-style: italic; }
+.table-wrap { overflow-x: auto; }
 form.search input { flex: 1; min-width: 0; padding: .7rem .8rem; font: inherit;
                     border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--fg); }
 button { padding: .6rem 1rem; font: inherit; border: 0; border-radius: 8px;

@@ -8,15 +8,16 @@
 {% if abstain %}
   <section class="empty">
     <h1>We couldn't find a reliable answer</h1>
-    <p>Our collection covers a small set of {{ scope.specialty | lower }} topics and doesn't
-       appear to address <q>{{ query }}</q>. Try different wording, browse the
-       <a href="{{ url_for('home') }}">topic list</a>, or ask your clinician.</p>
+    <p>The {% if not widen %}patient-information {% endif %}sources in this collection don't appear to
+       address <q>{{ query }}</q>. Try different wording{% if not widen %}, include textbooks and
+       research articles,{% endif %} or ask your clinician.</p>
   </section>
 {% else %}
   <h1 class="results-heading">Information related to <q>{{ query }}</q></h1>
   {% for g in groups %}
+    {% set doc = g.doc %}
     <article class="result">
-      <h2><a href="{{ url_for('topic', doc_id=g.doc.doc_id) }}">{{ g.doc.title }}</a></h2>
+      <h2><a href="{{ url_for('document', doc_id=doc.doc_id) }}">{{ doc.title }}</a></h2>
       {% for hit in g.hits %}
         <section class="excerpt">
           <h3>{{ hit.chunk.heading }}</h3>
@@ -25,9 +26,7 @@
           {% endfor %}
         </section>
       {% endfor %}
-      <p class="source">Source: <a href="{{ g.doc.url }}" rel="noopener" target="_blank">{{ g.doc.publisher }}</a>
-        · last updated {{ g.doc.last_updated or 'unknown' }}
-        · retrieved {{ g.doc.retrieved[:10] }}</p>
+      {% include "_source.html" %}
     </article>
   {% endfor %}
 {% endif %}

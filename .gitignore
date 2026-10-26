@@ -9,6 +9,10 @@ dist/
 
 # Derived / regenerable artifacts
 data/processed/*/embeddings_*.npy
+# Research full texts are large (~250 KB each). articles.jsonl, which IS committed,
+# lists every article, so `orthoinfo collect --version <v> --sources europepmc`
+# re-downloads exactly the same set.
+data/raw/*/europepmc/fulltext/
 data/logs/
 results/
 

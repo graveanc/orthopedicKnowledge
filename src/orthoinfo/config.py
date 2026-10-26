@@ -25,6 +25,10 @@ def load_scope() -> dict:
     return _load_toml("scope.toml")
 
 
+def load_sources_config() -> dict:
+    return _load_toml("sources.toml")
+
+
 def load_search_config() -> dict:
     return _load_toml("search.toml")
 

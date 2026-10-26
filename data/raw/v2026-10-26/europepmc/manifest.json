@@ -1,0 +1,45 @@
+{
+  "retrieved": "2026-10-26T18:12:11+00:00",
+  "queries": [
+    "carpal tunnel syndrome",
+    "trigger finger",
+    "de Quervain tenosynovitis",
+    "distal radius fracture",
+    "scaphoid fracture",
+    "lateral epicondylitis",
+    "cubital tunnel syndrome",
+    "Dupuytren contracture",
+    "thumb carpometacarpal osteoarthritis",
+    "ganglion cyst wrist",
+    "rotator cuff tear",
+    "frozen shoulder adhesive capsulitis",
+    "shoulder dislocation",
+    "hand osteoarthritis",
+    "knee osteoarthritis",
+    "hip osteoarthritis",
+    "hip fracture",
+    "anterior cruciate ligament injury",
+    "meniscus tear",
+    "total knee arthroplasty",
+    "total hip arthroplasty",
+    "ankle sprain",
+    "Achilles tendinopathy",
+    "plantar fasciitis",
+    "low back pain",
+    "lumbar spinal stenosis",
+    "scoliosis",
+    "osteoporotic fracture",
+    "stress fracture",
+    "tendinopathy"
+  ],
+  "licenses": [
+    "cc by",
+    "cc by-sa",
+    "cc0"
+  ],
+  "articles": 2222,
+  "missing_fulltext": [
+    "PMC6710724",
+    "PMC8927779"
+  ]
+}

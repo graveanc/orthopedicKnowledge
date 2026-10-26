@@ -8,13 +8,24 @@ import sys
 from pathlib import Path
 
 
+TYPES_HELP = ("comma-separated source types (patient_education, encyclopedia, textbook, "
+              "research_article) or 'all'; default from config/search.toml")
+
+
+def _types(value: str | None) -> list[str] | None:
+    """None means 'use the configured default'; [] means all types."""
+    if not value:
+        return None
+    return [] if value == "all" else [t.strip() for t in value.split(",")]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="orthoinfo", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("collect", help="download raw source material from MedlinePlus")
-    p.add_argument("--version", help="dataset version label (default: today's date)")
-    p.add_argument("--no-pages", action="store_true", help="skip fetching 'last updated' dates")
+    p = sub.add_parser("collect", help="download raw source material (resumable)")
+    p.add_argument("--version", help="dataset version label (default: v<today>)")
+    p.add_argument("--sources", help="comma-separated subset, e.g. medlineplus,niams")
 
     p = sub.add_parser("build", help="clean raw downloads into a processed dataset version")
     p.add_argument("--version")
@@ -23,6 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("query")
     p.add_argument("--method", default=None)
     p.add_argument("-k", type=int, default=5)
+    p.add_argument("--types", help=TYPES_HELP)
 
     p = sub.add_parser("validate-questions", help="check data/eval/questions.jsonl")
 
@@ -30,6 +42,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--methods", default="bm25,semantic,hybrid")
     p.add_argument("--split", default="dev", choices=["dev", "test", "all"])
     p.add_argument("--version")
+    p.add_argument("--types", help=TYPES_HELP)
+
+    p = sub.add_parser("pool", help="list unlabelled top results for relevance judging")
+    p.add_argument("--methods", default="bm25,semantic,hybrid")
+    p.add_argument("--depth", type=int, default=5)
+    p.add_argument("--types", help=TYPES_HELP)
 
     p = sub.add_parser("pilot-summary", help="summarise usability session CSVs in data/pilot/")
     p.add_argument("files", nargs="*", type=Path)
@@ -43,7 +61,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "collect":
         from .collect import collect
-        print(f"Raw data saved to {collect(args.version, fetch_pages=not args.no_pages)}")
+        only = [s.strip() for s in args.sources.split(",")] if args.sources else None
+        print(f"Raw data saved to {collect(args.version, only)}")
 
     elif args.command == "build":
         from .dataset import build
@@ -57,11 +76,15 @@ def main(argv: list[str] | None = None) -> int:
         cfg = load_search_config()
         method = args.method or cfg["default_method"]
         version, _, chunks = load_dataset()
-        result = build_retriever(method, chunks, cfg["semantic_model"], PROCESSED_DIR / version).search(args.query, args.k)
+        types = _types(args.types)
+        if types is None:
+            types = cfg.get("default_source_types")
+        retriever = build_retriever(method, chunks, cfg["semantic_model"], PROCESSED_DIR / version)
+        result = retriever.search(args.query, args.k, source_types=types)
         threshold = cfg["abstain_threshold"][method]
-        print(f"[{method}] confidence={result.confidence:.3f} (abstain below {threshold})")
+        print(f"[{method}] confidence={result.confidence:.3f} (abstain below {threshold}); types={types or 'all'}")
         for hit in result.hits:
-            print(f"  {hit.score:7.3f}  {hit.chunk['title']} — {hit.chunk['heading']}")
+            print(f"  {hit.score:7.3f}  [{hit.chunk['source']}] {hit.chunk['title']} — {hit.chunk['heading']}")
 
     elif args.command == "validate-questions":
         from .dataset import load_dataset
@@ -75,7 +98,11 @@ def main(argv: list[str] | None = None) -> int:
 
     elif args.command == "evaluate":
         from .experiment import run
-        run([m.strip() for m in args.methods.split(",")], args.split, args.version)
+        run([m.strip() for m in args.methods.split(",")], args.split, args.version, _types(args.types))
+
+    elif args.command == "pool":
+        from .experiment import pool
+        pool([m.strip() for m in args.methods.split(",")], args.depth, source_types=_types(args.types))
 
     elif args.command == "pilot-summary":
         from .pilot import load_sessions, summarise
